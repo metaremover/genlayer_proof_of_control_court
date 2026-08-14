@@ -1,0 +1,11 @@
+{
+  "genlayer_proof_of_control": {
+    "version": "1.0",
+    "claimant_address": "0x5c48c6f77617fc05761433cc4019a79b47d1ec7d",
+    "target_id": "example.com",
+    "challenge_id": "CHALLENGE_001",
+    "nonce": "GL-CONTROL-PROOF-0x5c48c6f7-CHALLENGE_001-9482715",
+    "timestamp": "2026-08-15T02:00:00Z",
+    "statement": "I hereby cryptographically assert and prove administrative control over this domain for GenLayer Intelligent Contracts."
+  }
+}
