@@ -4,6 +4,13 @@ An Intelligent Contract primitive built on **GenLayer** that proves a Web3 walle
 
 ---
 
+## 🔗 Verified Deployment & Telemetry Links
+- **GenLayer Explorer Contract**: [`0x110267b9d682F48eF62B018F6310cC71427B0D7F`](https://explorer-studio.genlayer.com/address/0x110267b9d682F48eF62B018F6310cC71427B0D7F)
+- **GitHub Repository**: [`https://github.com/metaremover/genlayer_proof_of_control_court`](https://github.com/metaremover/genlayer_proof_of_control_court)
+- **Live Proof Telemetry**: [`https://metaremover.github.io/genlayer-control.json`](https://metaremover.github.io/genlayer-control.json)
+
+---
+
 ## 📖 The Core Concept
 
 ProofOfControl Court replaces centralized DNS or GitHub OAuth verification with an on-chain, decentralized challenge-response oracle.
@@ -40,12 +47,21 @@ ProofOfControl Court replaces centralized DNS or GitHub OAuth verification with 
    - Users **cannot inject custom URLs or point to attacker-controlled redirect servers**.
 2. **Deterministic Python-Side Cryptographic Validation**:
    - The LLM's task is strictly confined to extracting the raw payload body.
-   - The **Python smart contract code** (not the LLM) performs strict substring validation:
-     ```python
-     is_nonce_present = (expected_nonce in extracted_body) or (expected_nonce in detected_nonce)
-     is_claimant_present = expected_claimant in extracted_body.lower()
-     ```
-   - This eliminates AI hallucinations and prompt injection bypasses.
+    - The **Python smart contract code** (not the LLM) performs strict substring and consensus invariant validation:
+      ```python
+      is_consistent_success = (
+          (not http_err)
+          and payload_found
+          and consensus_verified
+          and (fail_code == "NONE")
+          and is_nonce_match
+          and is_claimant_match
+          and (detected_nonce.lower() == expected_nonce.lower())
+          and (expected_nonce in extracted_body)
+          and (expected_claimant.lower() in extracted_body.lower())
+      )
+      ```
+    - This eliminates AI hallucinations, echoed nonce exploits, and prompt injection bypasses.
 3. **Sender-Bound Nonces**:
    - Nonces bind the caller's `gl.message.sender_address`, preventing replay attacks where an attacker copies another claimant's hosted file.
 
