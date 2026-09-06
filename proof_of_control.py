@@ -140,19 +140,26 @@ class ProofOfControlCourt(gl.Contract):
             "You are a Senior Decentralized Asset Ownership & ProofOfControl Auditor.\n"
             "Parse the live rendered HTTP response provided in the input.\n\n"
             "Your job:\n"
-            "1. Check if the page/payload was successfully retrieved (http_error=false).\n"
-            "2. Extract the exact body text or JSON payload from the response (extracted_body).\n"
-            "3. Search for the expected challenge nonce token and claimant wallet address within the payload.\n"
-            "4. If payload contains the expected nonce and claimant address: set payload_found=true, failure_code=\"NONE\", confidence=100.\n"
-            "5. If payload is 404/missing, set payload_found=false, failure_code=\"HTTP_404_OR_MISSING\", confidence=0.\n"
-            "6. If payload exists but nonce or claimant address is missing/mismatched, set payload_found=true, failure_code=\"NONCE_MISMATCH\", confidence=0.\n\n"
+            "1. Check if the page/payload was successfully retrieved (http_error=false). If HTTP status != 200, network error, or fetch failed, set http_error=true, payload_found=false, detected_nonce=\"NONE\", is_nonce_exact_match=false, is_claimant_exact_match=false, verified=false, failure_code=\"HTTP_ERROR\", confidence=0.\n"
+            "2. Extract the exact body text or JSON payload from the response (extracted_body). If the body is empty, missing, or malformed, set payload_found=false, detected_nonce=\"NONE\", is_nonce_exact_match=false, is_claimant_exact_match=false, verified=false, failure_code=\"PAYLOAD_NOT_FOUND\", confidence=0.\n"
+            "3. Extract the exact challenge nonce string found in the payload into detected_nonce (or \"NONE\" if missing). Check if detected_nonce exactly matches expected_nonce: set is_nonce_exact_match=true if exact match, otherwise false.\n"
+            "4. Search for expected_claimant wallet address in extracted_body: set is_claimant_exact_match=true if present, otherwise false.\n"
+            "5. Ownership is proven (verified=true) ONLY IF http_error=false, payload_found=true, is_nonce_exact_match=true, and is_claimant_exact_match=true. When verified=true, set failure_code=\"NONE\" and confidence=100.\n"
+            "6. If verification fails, verified=false, confidence=0, and failure_code MUST be strictly one of:\n"
+            "   - \"HTTP_ERROR\": HTTP request failed or error response.\n"
+            "   - \"PAYLOAD_NOT_FOUND\": Response body empty or invalid.\n"
+            "   - \"NONCE_MISMATCH\": Nonce missing from body or does not match expected_nonce.\n"
+            "   - \"CLAIMANT_MISMATCH\": Claimant address missing or mismatched in body.\n\n"
             "Output JSON format:\n"
             "{\n"
             '  "http_error": true/false,\n'
             '  "payload_found": true/false,\n'
             '  "extracted_body": "<raw payload text or JSON string>",\n'
-            '  "detected_nonce": "<extracted nonce string, or empty>",\n'
-            '  "failure_code": "<NONE, HTTP_404_OR_MISSING, or NONCE_MISMATCH>",\n'
+            '  "detected_nonce": "<exact nonce extracted from body, or NONE>",\n'
+            '  "is_nonce_exact_match": true/false,\n'
+            '  "is_claimant_exact_match": true/false,\n'
+            '  "verified": true/false,\n'
+            '  "failure_code": "<NONE, HTTP_ERROR, PAYLOAD_NOT_FOUND, NONCE_MISMATCH, or CLAIMANT_MISMATCH>",\n'
             '  "confidence": <integer 0 to 100>,\n'
             '  "summary": "<brief proof-of-control audit sentence>"\n'
             "}\n"
@@ -160,17 +167,23 @@ class ProofOfControlCourt(gl.Contract):
         )
 
         criteria = (
-            "ProofOfControl Equivalence Rule:\n"
-            "1. Strict Part: http_error boolean, payload_found boolean, and failure_code string MUST match 100% exactly across all validators.\n"
-            "2. Fuzzy Part: confidence score (0 to 100) must match within a bounded tolerance of +-10 points within the same outcome tier.\n"
-            "Independently parse the live HTTP response yourself. "
+            "ProofOfControl Strict Equivalence Rule:\n"
+            "1. Strict Consensus Fields: http_error (bool), payload_found (bool), detected_nonce (str), "
+            "is_nonce_exact_match (bool), is_claimant_exact_match (bool), verified (bool), and failure_code (str) "
+            "MUST match 100% exactly across all validators.\n"
+            "2. Fuzzy Part: confidence score (0 to 100) must match within a bounded tolerance of +-10 points within the same outcome tier. "
+            "summary string may vary.\n"
+            "Independently parse the live HTTP response and verify all evidence yourself. "
             "REJECT the leader's proposal if: "
-            "(1) the proposed failure_code is inconsistent with the HTTP body evidence in EITHER direction, "
-            "(2) the proposed payload_found is false when valid challenge payload data is present, "
-            "(3) the proposed extracted_body does not contain the actual HTTP response content, or "
-            "(4) the proposed confidence score deviates by more than +-10 points. "
-            "The output must be valid JSON with keys: http_error, payload_found, "
-            "extracted_body, detected_nonce, failure_code, confidence, and summary."
+            "(1) detected_nonce does not strictly match the exact nonce string present in the live HTTP body (or 'NONE' if absent), "
+            "(2) is_nonce_exact_match is true when detected_nonce != expected_nonce, "
+            "(3) is_claimant_exact_match is true when expected_claimant is not present in extracted_body, "
+            "(4) verified is true when failure_code != 'NONE' or any mismatch exists, "
+            "(5) failure_code is inconsistent with the HTTP body evidence in EITHER direction, "
+            "(6) payload_found is false when valid challenge payload data is present, or "
+            "(7) confidence score deviates by more than +-10 points. "
+            "The output must be valid JSON with keys: http_error, payload_found, extracted_body, "
+            "detected_nonce, is_nonce_exact_match, is_claimant_exact_match, verified, failure_code, confidence, and summary."
         )
 
         consensus_result = gl.eq_principle.prompt_non_comparative(
@@ -195,16 +208,28 @@ class ProofOfControlCourt(gl.Contract):
         payload_found = bool(result.get("payload_found", False))
         extracted_body = str(result.get("extracted_body", "")).strip()
         detected_nonce = str(result.get("detected_nonce", "")).strip()
+        is_nonce_match = bool(result.get("is_nonce_exact_match", False))
+        is_claimant_match = bool(result.get("is_claimant_exact_match", False))
+        consensus_verified = bool(result.get("verified", False))
         fail_code = str(result.get("failure_code", "UNKNOWN_ERROR")).strip().upper()
         conf_score = int(result.get("confidence", 0))
         summary_val = str(result.get("summary", ""))
 
-        # DETERMINISTIC PYTHON-SIDE CRYPTOGRAPHIC NONCE VALIDATION
-        # Python code (not the LLM) performs strict substring validation to prevent hallucinations
-        is_nonce_present = (expected_nonce in extracted_body) or (expected_nonce in detected_nonce)
-        is_claimant_present = expected_claimant in extracted_body.lower()
+        # DETERMINISTIC PYTHON-SIDE INVARIANT VALIDATION (FAIL-CLOSED)
+        # Eliminates bypass loopholes where failure_code != "NONE" or nonce is only echoed in detected_nonce.
+        is_consistent_success = (
+            (not http_err)
+            and payload_found
+            and consensus_verified
+            and (fail_code == "NONE")
+            and is_nonce_match
+            and is_claimant_match
+            and (detected_nonce.lower() == expected_nonce.lower())
+            and (expected_nonce in extracted_body)
+            and (expected_claimant.lower() in extracted_body.lower())
+        )
 
-        if (not http_err) and payload_found and is_nonce_present and is_claimant_present:
+        if is_consistent_success:
             # Control Verified Intact
             challenge.status = "VERIFIED"
             challenge.verified = True
@@ -215,26 +240,25 @@ class ProofOfControlCourt(gl.Contract):
                 f"Cryptographic nonce '{expected_nonce}' validated in hosted payload. " + summary_val
             )
         else:
-            # Control Verification Failed
+            # Control Verification Failed (Fail-Closed)
             challenge.status = "FAILED"
             challenge.verified = False
             challenge.confidence_score = u256(conf_score)
 
-            if http_err or not payload_found:
-                challenge.failure_code = "HTTP_404_OR_MISSING"
-                challenge.last_audit_summary = (
-                    f"PROOF OF CONTROL FAILED: Challenge URL '{target_url}' was unreachable or returned 404. " + summary_val
-                )
-            elif not is_nonce_present:
+            if fail_code != "NONE" and fail_code != "UNKNOWN_ERROR":
+                challenge.failure_code = fail_code
+            elif http_err or not payload_found:
+                challenge.failure_code = "PAYLOAD_NOT_FOUND" if not http_err else "HTTP_ERROR"
+            elif (not is_nonce_match) or (detected_nonce.lower() != expected_nonce.lower()) or (expected_nonce not in extracted_body):
                 challenge.failure_code = "NONCE_MISMATCH"
-                challenge.last_audit_summary = (
-                    f"PROOF OF CONTROL FAILED: Expected nonce '{expected_nonce}' was not found in hosted payload. " + summary_val
-                )
+            elif (not is_claimant_match) or (expected_claimant.lower() not in extracted_body.lower()):
+                challenge.failure_code = "CLAIMANT_MISMATCH"
             else:
-                challenge.failure_code = fail_code if fail_code != "NONE" else "CLAIMANT_MISMATCH"
-                challenge.last_audit_summary = (
-                    f"PROOF OF CONTROL FAILED: Claimant address mismatch in hosted payload. " + summary_val
-                )
+                challenge.failure_code = "CONSENSUS_VERIFICATION_FAILED"
+
+            challenge.last_audit_summary = (
+                f"PROOF OF CONTROL FAILED [{challenge.failure_code}]: Verification invariants failed. " + summary_val
+            )
 
         self.challenges[challenge_id] = challenge
 
